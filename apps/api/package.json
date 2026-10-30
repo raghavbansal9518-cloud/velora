@@ -1,0 +1,9 @@
+{
+  "name": "@velora/api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Velora backend — Node.js + Express + TypeScript",
+  "scripts": {},
+  "dependencies": {},
+  "devDependencies": {}
+}

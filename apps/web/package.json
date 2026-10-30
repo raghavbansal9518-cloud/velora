@@ -1,0 +1,9 @@
+{
+  "name": "@velora/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Velora frontend — React + TypeScript + Vite",
+  "scripts": {},
+  "dependencies": {},
+  "devDependencies": {}
+}
