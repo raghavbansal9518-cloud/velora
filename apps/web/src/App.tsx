@@ -20,6 +20,10 @@ function App() {
           <p>
             Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
           </p>
+          <div className="my-4 inline-flex items-center gap-2 rounded-full border border-blue-500/30 bg-blue-500/10 px-4 py-1.5 text-sm font-medium text-blue-400">
+            <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+            Tailwind CSS v4 Connected
+          </div>
         </div>
         <button
           type="button"
