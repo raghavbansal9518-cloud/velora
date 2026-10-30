@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import heroImg from './assets/hero.png'
 import reactLogo from './assets/react.svg'
 import viteLogo from './assets/vite.svg'
@@ -25,13 +26,21 @@ function App() {
             Tailwind CSS v4 Connected
           </div>
         </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
+        <div className="flex items-center justify-center gap-3 my-2">
+          <button
+            type="button"
+            className="counter"
+            onClick={() => setCount((count) => count + 1)}
+          >
+            Count is {count}
+          </button>
+          <Button
+            variant="default"
+            onClick={() => setCount((count) => count + 1)}
+          >
+            shadcn/ui Button (+1)
+          </Button>
+        </div>
       </section>
 
       <div className="ticks"></div>
