@@ -3,7 +3,21 @@
   "version": "0.0.0",
   "private": true,
   "description": "Velora backend — Node.js + Express + TypeScript",
-  "scripts": {},
-  "dependencies": {},
-  "devDependencies": {}
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3"
+  }
 }
