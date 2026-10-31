@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum ScanStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model Project {
+  id        String   @id @default(uuid())
+  name      String
+  targetUrl String   @map("target_url")
+  settings  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  scans     Scan[]
+
+  @@map("projects")
+}
+
+model Scan {
+  id           String     @id @default(uuid())
+  projectId    String     @map("project_id")
+  status       ScanStatus @default(PENDING)
+  errorMessage String?    @db.Text @map("error_message")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("scans")
+}
