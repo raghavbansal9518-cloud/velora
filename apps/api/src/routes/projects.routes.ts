@@ -1,8 +1,22 @@
 import { Router, type Request, type Response } from 'express'
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma.js'
 
 export const projectsRouter = Router()
+
+// Common Project field selection (excludes scans relation)
+const projectSelect = {
+  id: true,
+  name: true,
+  targetUrl: true,
+  settings: true,
+  createdAt: true,
+  updatedAt: true,
+} as const
+
+// -------------------------------------------------------------
+// POST /projects Validation Helpers
+// -------------------------------------------------------------
 
 export interface ValidationResult {
   isValid: boolean
@@ -105,6 +119,119 @@ export function validateCreateProjectInput(body: unknown): ValidationResult {
 }
 
 // -------------------------------------------------------------
+// PATCH /projects/:projectId Validation Helpers
+// -------------------------------------------------------------
+
+export interface UpdateProjectInput {
+  name?: string
+  targetUrl?: string
+  settings?: Prisma.InputJsonObject | Prisma.NullableJsonNullValueInput
+}
+
+export interface UpdateValidationResult {
+  isValid: boolean
+  errors: Record<string, string>
+  data?: UpdateProjectInput
+}
+
+export function validateUpdateProjectInput(body: unknown): UpdateValidationResult {
+  const errors: Record<string, string> = {}
+
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return {
+      isValid: false,
+      errors: { body: 'Request body must be a plain JSON object' },
+    }
+  }
+
+  const record = body as Record<string, unknown>
+
+  // Reject unknown fields
+  const unknownFields = Object.keys(record).filter((key) => !ALLOWED_BODY_FIELDS.has(key))
+  if (unknownFields.length > 0) {
+    errors.body = `Unknown field(s) not allowed: ${unknownFields.join(', ')}`
+  }
+
+  // Reject empty update payload ({})
+  const presentFields = Object.keys(record).filter((key) => ALLOWED_BODY_FIELDS.has(key))
+  if (presentFields.length === 0 && unknownFields.length === 0) {
+    errors.body = 'At least one field (name, targetUrl, settings) must be provided for update'
+  }
+
+  const updateData: UpdateProjectInput = {}
+
+  // Validate 'name' if present
+  if ('name' in record) {
+    if (typeof record.name !== 'string') {
+      errors.name = 'Project name must be a string'
+    } else {
+      const trimmedName = record.name.trim()
+      if (trimmedName.length === 0) {
+        errors.name = 'Project name cannot be empty'
+      } else if (trimmedName.length > 191) {
+        errors.name = 'Project name cannot exceed 191 characters'
+      } else {
+        updateData.name = trimmedName
+      }
+    }
+  }
+
+  // Validate 'targetUrl' if present
+  if ('targetUrl' in record) {
+    if (typeof record.targetUrl !== 'string') {
+      errors.targetUrl = 'Target URL must be a string'
+    } else {
+      const trimmedUrl = record.targetUrl.trim()
+      if (trimmedUrl.length === 0) {
+        errors.targetUrl = 'Target URL cannot be empty'
+      } else if (trimmedUrl.length > 2048) {
+        errors.targetUrl = 'Target URL cannot exceed 2048 characters'
+      } else {
+        try {
+          const parsedUrl = new URL(trimmedUrl)
+          if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+            errors.targetUrl = 'Target URL must use http: or https: protocol'
+          } else if (parsedUrl.username !== '' || parsedUrl.password !== '') {
+            errors.targetUrl = 'Target URL must not contain embedded credentials (username or password)'
+          } else {
+            updateData.targetUrl = trimmedUrl
+          }
+        } catch {
+          errors.targetUrl = 'Target URL must be a valid, parseable URL'
+        }
+      }
+    }
+  }
+
+  // Validate 'settings' if present
+  if ('settings' in record) {
+    const s = record.settings
+    if (s === null) {
+      updateData.settings = Prisma.DbNull
+    } else if (typeof s === 'object' && !Array.isArray(s)) {
+      const proto = Object.getPrototypeOf(s)
+      if (proto !== Object.prototype && proto !== null) {
+        errors.settings = 'Settings must be a plain JSON object or null'
+      } else {
+        updateData.settings = s as Prisma.InputJsonObject
+      }
+    } else {
+      errors.settings = 'Settings must be a plain JSON object or null'
+    }
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { isValid: false, errors }
+  }
+
+  return {
+    isValid: true,
+    errors: {},
+    data: updateData,
+  }
+}
+
+// -------------------------------------------------------------
 // Pagination & UUID Validation Helpers
 // -------------------------------------------------------------
 
@@ -199,7 +326,7 @@ export function validatePaginationQuery(query: Record<string, unknown>): Paginat
 
 export function isValidUuid(id: unknown): id is string {
   if (typeof id !== 'string') return false
-  return UUID_REGEX.test(id.trim())
+  return UUID_REGEX.test(id)
 }
 
 // -------------------------------------------------------------
@@ -227,6 +354,7 @@ projectsRouter.post('/projects', async (req: Request, res: Response) => {
       targetUrl,
       settings: settings ?? undefined,
     },
+    select: projectSelect,
   })
 
   res.status(201).json({
@@ -256,14 +384,7 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
       skip,
       take: limit,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      select: {
-        id: true,
-        name: true,
-        targetUrl: true,
-        settings: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+      select: projectSelect,
     }),
   ])
 
@@ -298,14 +419,7 @@ projectsRouter.get('/projects/:projectId', async (req: Request, res: Response) =
 
   const project = await prisma.project.findUnique({
     where: { id: projectId },
-    select: {
-      id: true,
-      name: true,
-      targetUrl: true,
-      settings: true,
-      createdAt: true,
-      updatedAt: true,
-    },
+    select: projectSelect,
   })
 
   if (!project) {
@@ -320,4 +434,99 @@ projectsRouter.get('/projects/:projectId', async (req: Request, res: Response) =
     status: 'success',
     data: project,
   })
+})
+
+// PATCH /api/projects/:projectId — Partial project update
+projectsRouter.patch('/projects/:projectId', async (req: Request, res: Response) => {
+  const { projectId } = req.params
+
+  if (!isValidUuid(projectId)) {
+    res.status(400).json({
+      error: 'Bad Request',
+      message: 'Invalid project ID format',
+      details: {
+        projectId: 'Project ID must be a valid UUID',
+      },
+    })
+    return
+  }
+
+  const validation = validateUpdateProjectInput(req.body)
+
+  if (!validation.isValid || !validation.data) {
+    res.status(400).json({
+      error: 'Bad Request',
+      message: 'Validation failed',
+      details: validation.errors,
+    })
+    return
+  }
+
+  try {
+    const project = await prisma.project.update({
+      where: { id: projectId },
+      data: validation.data,
+      select: projectSelect,
+    })
+
+    res.status(200).json({
+      status: 'success',
+      data: project,
+    })
+  } catch (err: unknown) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2025'
+    ) {
+      res.status(404).json({
+        error: 'Not Found',
+        message: 'Project not found',
+      })
+      return
+    }
+    throw err
+  }
+})
+
+// DELETE /api/projects/:projectId — Delete a project (cascades to scans in DB)
+projectsRouter.delete('/projects/:projectId', async (req: Request, res: Response) => {
+  const { projectId } = req.params
+
+  if (!isValidUuid(projectId)) {
+    res.status(400).json({
+      error: 'Bad Request',
+      message: 'Invalid project ID format',
+      details: {
+        projectId: 'Project ID must be a valid UUID',
+      },
+    })
+    return
+  }
+
+  try {
+    const deletedProject = await prisma.project.delete({
+      where: { id: projectId },
+      select: { id: true },
+    })
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Project deleted successfully',
+      data: {
+        id: deletedProject.id,
+      },
+    })
+  } catch (err: unknown) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2025'
+    ) {
+      res.status(404).json({
+        error: 'Not Found',
+        message: 'Project not found',
+      })
+      return
+    }
+    throw err
+  }
 })
