@@ -17,7 +17,7 @@ enum ScanStatus {
 model Project {
   id        String   @id @default(uuid())
   name      String
-  targetUrl String   @map("target_url")
+  targetUrl String   @map("target_url") @db.VarChar(2048)
   settings  Json?
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
