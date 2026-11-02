@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Plus,
   Loader2,
@@ -9,6 +9,8 @@ import {
   CheckCircle2,
   Pencil,
   Trash2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ProjectRegisterForm } from '@/components/projects/ProjectRegisterForm'
@@ -16,11 +18,28 @@ import { ProjectEditDialog } from '@/components/projects/ProjectEditDialog'
 import { ProjectDeleteDialog } from '@/components/projects/ProjectDeleteDialog'
 import { fetchProjects, type Project } from '@/lib/api'
 
+const PAGE_SIZE = 10
+
+function parsePageParam(rawPage: string | null): number {
+  if (!rawPage) return 1
+  const trimmed = rawPage.trim()
+  if (!/^[1-9]\d*$/.test(trimmed)) return 1
+  const num = Number(trimmed)
+  if (!Number.isSafeInteger(num) || num < 1) return 1
+  return num
+}
+
 export function ProjectsPage() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const currentPage = parsePageParam(searchParams.get('page'))
 
   const [projects, setProjects] = useState<Project[]>([])
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isRegisterOpen, setIsRegisterOpen] = useState(false)
@@ -63,12 +82,15 @@ export function ProjectsPage() {
     }
   }, [])
 
-  const reloadProjects = async () => {
+  const reloadProjects = async (targetPage?: number) => {
+    const pageToLoad = typeof targetPage === 'number' ? targetPage : currentPage
     setIsLoading(true)
     setError(null)
     try {
-      const result = await fetchProjects({ limit: 50 })
+      const result = await fetchProjects({ page: pageToLoad, limit: PAGE_SIZE })
       setProjects(result.projects)
+      setTotalPages(result.pagination.totalPages)
+      setTotalCount(result.pagination.total)
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to load projects. Please try again.'
@@ -79,17 +101,31 @@ export function ProjectsPage() {
   }
 
   useEffect(() => {
-    let isMounted = true
+    let isCurrent = true
 
-    fetchProjects({ limit: 50 })
+    fetchProjects({ page: currentPage, limit: PAGE_SIZE })
       .then((result) => {
-        if (isMounted) {
+        if (isCurrent) {
           setProjects(result.projects)
+          setTotalPages(result.pagination.totalPages)
+          setTotalCount(result.pagination.total)
           setIsLoading(false)
+
+          // Clamp to last valid page if current page exceeds totalPages (and totalPages > 0)
+          if (result.pagination.totalPages > 0 && currentPage > result.pagination.totalPages) {
+            setSearchParams(
+              (prev) => {
+                const next = new URLSearchParams(prev)
+                next.set('page', String(result.pagination.totalPages))
+                return next
+              },
+              { replace: true }
+            )
+          }
         }
       })
       .catch((err) => {
-        if (isMounted) {
+        if (isCurrent) {
           setError(
             err instanceof Error ? err.message : 'Failed to load projects. Please try again.'
           )
@@ -98,16 +134,35 @@ export function ProjectsPage() {
       })
 
     return () => {
-      isMounted = false
+      isCurrent = false
     }
-  }, [])
+  }, [currentPage, setSearchParams])
+
+  const goToPage = (targetPage: number) => {
+    if (targetPage < 1 || (totalPages > 0 && targetPage > totalPages) || targetPage === currentPage) {
+      return
+    }
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('page', String(targetPage))
+      return next
+    })
+  }
 
   const handleRegisterSuccess = async (newProject: Project) => {
     setIsRegisterOpen(false)
     showBanner(`Project "${newProject.name}" was registered successfully.`)
 
-    // Reload list to synchronize with backend pagination and counts
-    await reloadProjects()
+    if (currentPage !== 1) {
+      // Return to page 1 where the newly created project appears at the top
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('page', '1')
+        return next
+      })
+    } else {
+      await reloadProjects(1)
+    }
   }
 
   const handleEditSuccess = (updatedProject: Project) => {
@@ -141,6 +196,9 @@ export function ProjectsPage() {
       return isoString
     }
   }
+
+  const showingStart = projects.length > 0 ? (currentPage - 1) * PAGE_SIZE + 1 : 0
+  const showingEnd = Math.min((currentPage - 1) * PAGE_SIZE + projects.length, totalCount)
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8 text-left">
@@ -213,7 +271,7 @@ export function ProjectsPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={reloadProjects}
+            onClick={() => reloadProjects()}
             className="mt-4 gap-2"
           >
             <RefreshCw className="h-4 w-4" />
@@ -222,8 +280,8 @@ export function ProjectsPage() {
         </div>
       )}
 
-      {/* Empty state */}
-      {!isLoading && !error && projects.length === 0 && (
+      {/* Empty state: No projects in database */}
+      {!isLoading && !error && projects.length === 0 && totalCount === 0 && (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card/50 p-12 text-center shadow-sm">
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
             <Globe className="h-6 w-6" />
@@ -246,65 +304,131 @@ export function ProjectsPage() {
         </div>
       )}
 
+      {/* Empty state: Current page has no projects, but projects exist in database */}
+      {!isLoading && !error && projects.length === 0 && totalCount > 0 && (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-card/50 p-12 text-center shadow-sm">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <Globe className="h-6 w-6" />
+          </div>
+          <h2 className="mt-4 text-lg font-semibold text-foreground m-0">No Projects on This Page</h2>
+          <p className="mt-1.5 text-sm text-muted-foreground max-w-sm">
+            Page {currentPage} contains no projects. Total projects registered: {totalCount}.
+          </p>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => goToPage(1)}
+            className="mt-5"
+          >
+            <span>Go to Page 1</span>
+          </Button>
+        </div>
+      )}
+
       {/* Projects list */}
       {!isLoading && !error && projects.length > 0 && (
-        <div className="grid gap-4">
-          {projects.map((project) => (
-            <div
-              key={project.id}
-              className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/50"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold text-foreground truncate m-0">
-                    {project.name}
-                  </h2>
+        <>
+          <div className="grid gap-4">
+            {projects.map((project) => (
+              <div
+                key={project.id}
+                className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-border bg-card p-4 shadow-sm transition-colors hover:border-primary/50"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-semibold text-foreground truncate m-0">
+                      {project.name}
+                    </h2>
+                  </div>
+                  <div className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground truncate">
+                    <Globe className="h-3.5 w-3.5 shrink-0" />
+                    <a
+                      href={project.targetUrl}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="hover:text-primary hover:underline truncate"
+                    >
+                      {project.targetUrl}
+                    </a>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span className="font-mono">ID: {project.id}</span>
+                    <span>&bull;</span>
+                    <span>Created {formatDate(project.createdAt)}</span>
+                  </div>
                 </div>
-                <div className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground truncate">
-                  <Globe className="h-3.5 w-3.5 shrink-0" />
-                  <a
-                    href={project.targetUrl}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="hover:text-primary hover:underline truncate"
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setProjectToEdit(project)}
+                    aria-label={`Edit ${project.name}`}
                   >
-                    {project.targetUrl}
-                  </a>
+                    <Pencil className="h-3.5 w-3.5" />
+                    <span>Edit</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setProjectToDelete(project)}
+                    aria-label={`Delete ${project.name}`}
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Delete</span>
+                  </Button>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to={`/projects/${project.id}`}>View Project</Link>
+                  </Button>
                 </div>
-                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  <span className="font-mono">ID: {project.id}</span>
-                  <span>&bull;</span>
-                  <span>Created {formatDate(project.createdAt)}</span>
-                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Pagination controls */}
+          {totalPages > 1 && (
+            <nav
+              role="navigation"
+              aria-label="Pagination Navigation"
+              className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4 text-sm"
+            >
+              <div className="text-xs text-muted-foreground">
+                Showing {showingStart}–{showingEnd} of {totalCount} projects
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setProjectToEdit(project)}
-                  aria-label={`Edit ${project.name}`}
+                  onClick={() => goToPage(currentPage - 1)}
+                  disabled={currentPage <= 1 || isLoading}
+                  aria-label="Go to previous page"
+                  className="gap-1"
                 >
-                  <Pencil className="h-3.5 w-3.5" />
-                  <span>Edit</span>
+                  <ChevronLeft className="h-4 w-4" />
+                  <span>Previous</span>
                 </Button>
+
+                <span className="px-2 text-xs font-medium text-foreground">
+                  Page {currentPage} of {totalPages}
+                </span>
+
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setProjectToDelete(project)}
-                  aria-label={`Delete ${project.name}`}
-                  className="text-destructive hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
+                  onClick={() => goToPage(currentPage + 1)}
+                  disabled={currentPage >= totalPages || isLoading}
+                  aria-label="Go to next page"
+                  className="gap-1"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  <span>Delete</span>
-                </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <Link to={`/projects/${project.id}`}>View Project</Link>
+                  <span>Next</span>
+                  <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
-            </div>
-          ))}
-        </div>
+            </nav>
+          )}
+        </>
       )}
 
       {/* Edit Project Dialog */}
