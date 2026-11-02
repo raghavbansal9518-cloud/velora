@@ -20,6 +20,12 @@ export interface CreateProjectInput {
   settings?: Record<string, unknown>
 }
 
+export interface UpdateProjectInput {
+  name?: string
+  targetUrl?: string
+  settings?: Record<string, unknown> | null
+}
+
 export interface FetchProjectsParams {
   page?: number
   limit?: number
@@ -44,6 +50,7 @@ export class ApiError extends Error {
 
 interface BackendSuccessEnvelope<T> {
   status: 'success'
+  message?: string
   data: T
   pagination?: PaginationMetadata
 }
@@ -142,4 +149,33 @@ export async function fetchProjects(params?: FetchProjectsParams): Promise<Fetch
       totalPages: 1,
     },
   }
+}
+
+export async function fetchProject(projectId: string): Promise<Project> {
+  const response = await apiRequest<BackendSuccessEnvelope<Project>>(`/api/projects/${projectId}`)
+  return response.data
+}
+
+export async function updateProject(projectId: string, input: UpdateProjectInput): Promise<Project> {
+  const payload: Record<string, unknown> = {}
+  if (input.name !== undefined) payload.name = input.name
+  if (input.targetUrl !== undefined) payload.targetUrl = input.targetUrl
+  if (input.settings !== undefined) payload.settings = input.settings
+
+  const response = await apiRequest<BackendSuccessEnvelope<Project>>(`/api/projects/${projectId}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  return response.data
+}
+
+export async function deleteProject(projectId: string): Promise<string> {
+  const response = await apiRequest<BackendSuccessEnvelope<{ id: string }>>(`/api/projects/${projectId}`, {
+    method: 'DELETE',
+  })
+  return response.data.id
 }

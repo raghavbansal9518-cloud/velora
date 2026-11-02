@@ -1,16 +1,67 @@
-import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
-import { Plus, Loader2, AlertCircle, RefreshCw, Globe, CheckCircle2 } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import {
+  Plus,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+  Globe,
+  CheckCircle2,
+  Pencil,
+  Trash2,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ProjectRegisterForm } from '@/components/projects/ProjectRegisterForm'
+import { ProjectEditDialog } from '@/components/projects/ProjectEditDialog'
+import { ProjectDeleteDialog } from '@/components/projects/ProjectDeleteDialog'
 import { fetchProjects, type Project } from '@/lib/api'
 
 export function ProjectsPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
+
   const [projects, setProjects] = useState<Project[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isRegisterOpen, setIsRegisterOpen] = useState(false)
   const [successBanner, setSuccessBanner] = useState<string | null>(null)
+
+  const [projectToEdit, setProjectToEdit] = useState<Project | null>(null)
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
+
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const showBanner = (message: string) => {
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current)
+    }
+    setSuccessBanner(message)
+    bannerTimerRef.current = setTimeout(() => {
+      setSuccessBanner(null)
+      bannerTimerRef.current = null
+    }, 6000)
+  }
+
+  // Consume deleted project notification from navigation state
+  useEffect(() => {
+    const navState = location.state as { deletedProjectName?: string } | null
+    if (navState?.deletedProjectName) {
+      const projectName = navState.deletedProjectName
+      navigate('/projects', { replace: true, state: {} })
+      const timer = setTimeout(() => {
+        showBanner(`Project "${projectName}" was deleted successfully.`)
+      }, 0)
+      return () => clearTimeout(timer)
+    }
+  }, [location.state, navigate])
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current) {
+        clearTimeout(bannerTimerRef.current)
+      }
+    }
+  }, [])
 
   const reloadProjects = async () => {
     setIsLoading(true)
@@ -53,17 +104,30 @@ export function ProjectsPage() {
 
   const handleRegisterSuccess = async (newProject: Project) => {
     setIsRegisterOpen(false)
-    setSuccessBanner(`Project "${newProject.name}" was registered successfully.`)
+    showBanner(`Project "${newProject.name}" was registered successfully.`)
 
     // Reload list to synchronize with backend pagination and counts
     await reloadProjects()
+  }
 
-    // Auto-dismiss success banner after 6 seconds
-    setTimeout(() => {
-      setSuccessBanner((prev) =>
-        prev === `Project "${newProject.name}" was registered successfully.` ? null : prev
-      )
-    }, 6000)
+  const handleEditSuccess = (updatedProject: Project) => {
+    setProjects((prev) =>
+      prev.map((p) => (p.id === updatedProject.id ? updatedProject : p))
+    )
+    showBanner(`Project "${updatedProject.name}" was updated successfully.`)
+    setProjectToEdit(null)
+  }
+
+  const handleDeleteSuccess = (deletedProjectId: string) => {
+    const deletedProject = projects.find((p) => p.id === deletedProjectId)
+    const projectName = deletedProject ? deletedProject.name : undefined
+    setProjects((prev) => prev.filter((p) => p.id !== deletedProjectId))
+    showBanner(
+      projectName
+        ? `Project "${projectName}" was deleted successfully.`
+        : 'Project was deleted successfully.'
+    )
+    setProjectToDelete(null)
   }
 
   const formatDate = (isoString: string): string => {
@@ -214,7 +278,26 @@ export function ProjectsPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setProjectToEdit(project)}
+                  aria-label={`Edit ${project.name}`}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  <span>Edit</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setProjectToDelete(project)}
+                  aria-label={`Delete ${project.name}`}
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>Delete</span>
+                </Button>
                 <Button variant="outline" size="sm" asChild>
                   <Link to={`/projects/${project.id}`}>View Project</Link>
                 </Button>
@@ -222,6 +305,30 @@ export function ProjectsPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Edit Project Dialog */}
+      {projectToEdit && (
+        <ProjectEditDialog
+          project={projectToEdit}
+          open={Boolean(projectToEdit)}
+          onOpenChange={(open) => {
+            if (!open) setProjectToEdit(null)
+          }}
+          onSuccess={handleEditSuccess}
+        />
+      )}
+
+      {/* Delete Project Dialog */}
+      {projectToDelete && (
+        <ProjectDeleteDialog
+          project={projectToDelete}
+          open={Boolean(projectToDelete)}
+          onOpenChange={(open) => {
+            if (!open) setProjectToDelete(null)
+          }}
+          onSuccess={handleDeleteSuccess}
+        />
       )}
     </div>
   )
